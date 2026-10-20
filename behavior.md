@@ -1,6 +1,8 @@
 # StackChan behavior controller
 
-Draft design. Nothing in this document is implemented yet.
+Status: the controller core is implemented in [include/Behavior.hpp](include/Behavior.hpp) and wired into [src/main.cpp](src/main.cpp).
+Host tests: [test/test_behavior.cpp](test/test_behavior.cpp).
+Touch events work today. Camera, microphone, battery and BLE/LLM events are defined and tested, but no sensor produces them yet.
 
 ## Purpose
 
@@ -127,40 +129,45 @@ Manual debug control (buttons, flicks) can stay outside the controller, as an ov
 
 ## Interface
 
-The controller is a pure function of observations and time, so it can be unit tested on the PC (`native` env) without hardware, and later swapped for a behavior tree or a learned policy.
+The controller is a pure function of events and time, so it is tested on the PC without hardware (`Behavior.hpp` does not include Arduino or M5Unified), and it can later be swapped for a behavior tree or a learned policy.
 
 ```cpp
-struct Observation {
-  uint32_t now_ms;
-  bool head_touched;      // edge: true for one tick
-  bool person_visible;
-  bool loud_sound;
-  float battery_level;    // 0..1
-  bool charging;
-  // pending messages from BLE/WiFi/LLM are delivered as events
+namespace stackchan::behavior {
+
+enum class EventType { kTouched, kPersonDetected, kPersonLost, kLoudSound,
+                       kBatteryLow, kCharging, kSpeakRequest, kSpeechFinished };
+struct Event { EventType type; char text[48]; };   // text is used by kSpeakRequest
+
+struct Observation { uint32_t now_ms; };
+
+struct Action {              // apply only what is set
+  bool set_mood;   Mood mood;            // kNeutral, kSmile, kAngry, kSad, kSleepy, kDoubt
+  bool set_speech; const char* speech;   // "" hides the balloon
+  Motion motion;                         // same values as AnimationName, kNone = no motion
 };
 
-struct Action {
-  // display
-  stackchan::display::Expression expression;   // emotional expression
-  uint8_t blush;                               // 0..255, kBlush
-  const char* speech;                          // nullptr = keep current
-  // motion
-  int8_t animation;                            // AnimationName, -1 = none
-  // later: led color, voice
-};
-
-class BehaviorController {
+class HsmBehavior {
  public:
-  virtual ~BehaviorController() = default;
-  virtual void pushEvent(const Event& event) = 0;
-  virtual Action update(const Observation& obs) = 0;   // called at ~30 Hz
+  void pushEvent(const Event&);          // queued, handled in the next update()
+  Action update(const Observation&);     // call at about 30 Hz
+  State state() const;
+  // tunable timings: interacting_ms, attentive_timeout_ms, sleep_after_ms, pick_min_ms, pick_max_ms
+  // on_transition: callback for logging
 };
+}
 ```
 
-`HsmBehavior : BehaviorController` is the first implementation.
-`main.cpp` applies the returned `Action` to `display` and `anim_controller`.
-Applying only *changes* (not every tick) avoids restarting animations.
+`main.cpp` pushes `kTouched` from the head touch sensor, runs `Behavior_Update` at 30 fps, and maps the returned `Action` to the display (`setEmotionalExpression`, speech balloon) and `AnimationController`.
+Because only changes are returned, animations are not restarted every tick.
+`Mood` and `Motion` are the controller's own enums, so it does not depend on the display library.
+
+Behavior notes:
+
+- Touching in `Talking` is ignored, so speech is not interrupted. Touching again in `Interacting` restarts the timer and the nod.
+- A touch while `Sleeping` wakes StackChan directly into `Interacting`. A loud sound wakes it into `Idle`.
+- `SpeakRequest` shows the text for `2 s + 80 ms per character` (max 15 s) unless `SpeechFinished` arrives first.
+- Events are ignored while in `LowBattery`, except `Charging`.
+- Buttons and flicks in `main.cpp` stay outside the controller as manual debug control. The manually set expression stays until the controller next sets a mood.
 
 ## Idle picker
 
@@ -189,13 +196,15 @@ The next pick happens after `random(3 s, 10 s)`. Weights and cooldowns are data,
 
 ## Implementation plan
 
-1. Add `include/Behavior.hpp` with `Event`, `Observation`, `Action` and the `BehaviorController` interface.
-2. Implement `HsmBehavior` with `Idle`, `Interacting` and `Sleeping`. This reproduces today's behavior (touch -> smile 5 s -> neutral) and adds sleep.
-3. Move the touch / timer code out of `M5_update` in `main.cpp`, apply `Action` to display and animations.
-4. Add the idle picker and tune weights on a real device.
-5. Add `Attentive` and `Talking` when camera and BLE/LLM inputs exist.
-6. Add `LowBattery` with the battery sensor.
-7. Add native tests for the state sequences.
+1. [x] `include/Behavior.hpp`: events, actions, `HsmBehavior` with all states (`Idle`, `Attentive`, `Interacting`, `Talking`, `Sleeping`, `LowBattery`).
+2. [x] Touch -> smile -> neutral after 5 s, plus sleep after 5 minutes, replaces the timer code in `main.cpp`.
+3. [x] Idle picker, replacing the random motion every minute.
+4. [x] Host tests for the state sequences and the picker.
+5. [ ] Tune weights, cooldowns and timings on a real device.
+6. [ ] Produce `PersonDetected` / `PersonLost` (camera) and `LoudSound` (microphone).
+7. [ ] Produce `BatteryLow` / `Charging` from the battery sensor.
+8. [ ] Produce `SpeakRequest` from BLE / WiFi / LLM.
+9. [ ] Cheek blush with a smile (needs a newer `stackchan-display` than 0.4.0, which has no `kBlush`).
 
 ## Open questions
 

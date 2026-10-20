@@ -18,6 +18,7 @@
 
 #include "Animation.hpp"
 #include "AnimationClipExamples.hpp"
+#include "Behavior.hpp"
 #include "BLEStackchanService.hpp"
 #include "PaletteExamples.hpp"
 
@@ -44,6 +45,14 @@
 
 using stackchan::motion::AnimationName;
 
+// the controller returns motions with the same values as AnimationName
+static_assert(static_cast<int>(stackchan::behavior::Motion::kNod) ==
+                  static_cast<int>(AnimationName::kNod),
+              "Motion and AnimationName must have the same values");
+static_assert(static_cast<int>(stackchan::behavior::Motion::kShake) ==
+                  static_cast<int>(AnimationName::kShake),
+              "Motion and AnimationName must have the same values");
+
 Display display;
 char balloon_text[20];
 // ble::StackchanService stackchan_srv;
@@ -58,7 +67,7 @@ float time_sec = 0.0f;
 unsigned long milli_sec = 0U;
 unsigned long m5_count = 0;
 unsigned long main_count = 0;
-unsigned long last_touch_detected_time = 0;
+stackchan::behavior::HsmBehavior behavior;
 unsigned long last_facial_expression_changed_time = 0;
 
 const Expression expressions[] = {Expression::kNeutral, Expression::kSmile,
@@ -77,6 +86,9 @@ void registerFaces();
 void changeFace(int8_t delta);
 void changeExpression(int8_t delta);
 void assignMiaPalette(ColorPalette* palette);
+void applyBehaviorAction(const stackchan::behavior::Action& action);
+void logTransition(stackchan::behavior::State from,
+                   stackchan::behavior::State to, const char* cause);
 
 void setup() {
   // please uncomment if you supply power from GROVE connector to the CORES3
@@ -228,25 +240,10 @@ void setup() {
              auto& head_ts = M5StackChan.TouchSensor;
 
              if (head_ts.wasClicked()) {
-               last_touch_detected_time = millis();
-               display.getExpressionWeight().setEmotionalExpression(
-                   stackchan::display::Expression::kSmile, 255);
-               last_facial_expression_changed_time = last_touch_detected_time;
+               behavior.pushEvent(stackchan::behavior::Event(
+                   stackchan::behavior::EventType::kTouched));
              }
 
-             if (m5_count % (100 * 60) == 0) {
-               auto i = random(7);
-               anim_controller.play(i);
-             }
-
-             if (millis() - last_facial_expression_changed_time > 5000) {
-               // reset to neutral expression after 5 seconds of no touch
-               expression_idx = 0;
-               display.getExpressionWeight().setEmotionalExpression(
-                   stackchan::display::Expression::kNeutral, 255);
-             }
-
-             // random motion
              m5_count += 1;
            })
       ->startFps(100);
@@ -279,6 +276,18 @@ void setup() {
            })
       ->startFps(30);
 
+  // the behavior controller decides expressions, speech and motions
+  behavior.on_transition = logTransition;
+  behavior.seed(micros());
+  Tasks
+      .add("Behavior_Update",
+           [] {
+             stackchan::behavior::Observation obs;
+             obs.now_ms = millis();
+             applyBehaviorAction(behavior.update(obs));
+           })
+      ->startFps(30);
+
   Tasks
       .add("Animation_Update",
            [] {
@@ -298,6 +307,50 @@ void loop() {
   Tasks.update();  // automatically execute tasks
 
   delay(1);
+}
+
+void applyBehaviorAction(const stackchan::behavior::Action& action) {
+  using stackchan::behavior::Mood;
+  using stackchan::display::Expression;
+
+  if (action.set_mood) {
+    Expression e = Expression::kNeutral;
+    switch (action.mood) {
+      case Mood::kNeutral:
+        e = Expression::kNeutral;
+        break;
+      case Mood::kSmile:
+        e = Expression::kSmile;
+        break;
+      case Mood::kAngry:
+        e = Expression::kAngry;
+        break;
+      case Mood::kSad:
+        e = Expression::kSad;
+        break;
+      case Mood::kSleepy:
+        e = Expression::kSleepy;
+        break;
+      case Mood::kDoubt:
+        e = Expression::kDoubt;
+        break;
+    }
+    display.getExpressionWeight().setEmotionalExpression(e, 255);
+  }
+
+  if (action.set_speech) {
+    display.getSpeechBalloon().setText(action.speech);
+  }
+
+  if (action.motion != stackchan::behavior::Motion::kNone) {
+    anim_controller.play(static_cast<unsigned short>(action.motion));
+  }
+}
+
+void logTransition(stackchan::behavior::State from,
+                   stackchan::behavior::State to, const char* cause) {
+  M5_LOGI("behavior: %s -> %s (%s)", stackchan::behavior::stateName(from),
+          stackchan::behavior::stateName(to), cause);
 }
 
 void changeFace(int8_t delta) {
