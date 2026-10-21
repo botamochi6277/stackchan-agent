@@ -35,7 +35,7 @@ Central---|BLE|stackchan_agent
 - **Head motion** with animation clips (look front / up / down / left / right, nod, shake). Button C plays the clips in order. See [animation.md](animation.md).
 - **BLE service** to control the face and servos from a central device. The BLE code is currently commented out in `src/main.cpp`.
 
-Sensor inputs other than the head touch sensor (camera, microphone, battery, BLE / LLM) are not connected to the behavior controller yet.
+The head touch sensor and the battery level (low battery -> sad face until charging) are connected to the behavior controller. Camera, microphone and BLE / LLM inputs are not connected yet.
 See the plan in [behavior.md](behavior.md) and the overall design in [policy.md](policy.md).
 
 ## Build
@@ -69,8 +69,8 @@ g++ -std=c++17 -Wall -Iinclude test/test_behavior.cpp -o test_behavior
 ./test_behavior
 ```
 
-## Service Detail
-
+<!-- ## Service Detail
+TODO: Update move bluetooth description to bluetooth.md
 The BLE service is currently disabled in `src/main.cpp`.
 
 ```json
@@ -110,10 +110,10 @@ The BLE service is currently disabled in `src/main.cpp`.
     }
   ]
 }
-```
+``` -->
 
-## Animation
-
+<!-- ## Animation
+TODO:  Update description
 ```mermaid
 graph TB
 
@@ -124,5 +124,4 @@ end
 
 update_timestamp
 
-
-```
+``` -->

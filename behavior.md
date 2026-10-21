@@ -2,7 +2,7 @@
 
 Status: the controller core is implemented in [include/Behavior.hpp](include/Behavior.hpp) and wired into [src/main.cpp](src/main.cpp).
 Host tests: [test/test_behavior.cpp](test/test_behavior.cpp).
-Touch events work today. Camera, microphone, battery and BLE/LLM events are defined and tested, but no sensor produces them yet.
+Touch and battery events work today. Camera, microphone and BLE/LLM events are defined and tested, but nothing produces them yet.
 
 ## Purpose
 
@@ -120,7 +120,7 @@ Events are produced from sensors and communication. States never read sensors di
 | `ButtonPressed(id)` | buttons A/B/C | manual debug control |
 | `PersonDetected` / `PersonLost` | camera | not available |
 | `LoudSound` | microphone | not available |
-| `BatteryLow` / `Charging` | battery sensor | not available |
+| `BatteryLow` / `Charging` | battery sensor, through `BatteryMonitor` (see below) | implemented |
 | `SpeakRequest(text)` | BLE / WiFi / LLM | not available |
 | `SpeechFinished` | speaker | not available |
 | `Timeout` | state timer | `millis() - last_... > 5000` |
@@ -169,6 +169,21 @@ Behavior notes:
 - Events are ignored while in `LowBattery`, except `Charging`.
 - Buttons and flicks in `main.cpp` stay outside the controller as manual debug control. The manually set expression stays until the controller next sets a mood.
 
+## Battery events
+
+[include/BatteryMonitor.hpp](include/BatteryMonitor.hpp) turns battery samples into events. It is also free of Arduino / M5Unified dependencies and tested on the PC.
+`main.cpp` samples `M5.Power.getBatteryLevel()` and `M5.Power.isCharging()` once per second in the `Battery_Monitor` task.
+
+| Event | Condition |
+|---|---|
+| `BatteryLow` | level <= 15 % and not charging, for 5 samples in a row |
+| `Charging` | while low: charging, or level >= 25 %, for 5 samples in a row |
+
+- The 15 % / 25 % thresholds give hysteresis, so the state does not flip around a single threshold. Both thresholds and the 5-sample debounce are public fields.
+- Each event is emitted once per change, not on every sample.
+- Levels outside 0..100 (no battery, read error) are ignored.
+- The controller enters `LowBattery` (sad face) on `BatteryLow`, and goes back to `Idle` on `Charging`.
+
 ## Idle picker
 
 Inside `Idle` (and a reduced set in `Attentive`), actions are chosen by weights and random delays:
@@ -202,7 +217,7 @@ The next pick happens after `random(3 s, 10 s)`. Weights and cooldowns are data,
 4. [x] Host tests for the state sequences and the picker.
 5. [ ] Tune weights, cooldowns and timings on a real device.
 6. [ ] Produce `PersonDetected` / `PersonLost` (camera) and `LoudSound` (microphone).
-7. [ ] Produce `BatteryLow` / `Charging` from the battery sensor.
+7. [x] Produce `BatteryLow` / `Charging` from the battery sensor (`include/BatteryMonitor.hpp`).
 8. [ ] Produce `SpeakRequest` from BLE / WiFi / LLM.
 9. [ ] Cheek blush with a smile (needs a newer `stackchan-display` than 0.4.0, which has no `kBlush`).
 

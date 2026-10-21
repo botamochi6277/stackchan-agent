@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "BatteryMonitor.hpp"
 #include "Behavior.hpp"
 
 using namespace stackchan::behavior;
@@ -138,6 +139,76 @@ static void test_idle_picker() {
   CHECK(b.state() == State::kIdle);
 }
 
+static void test_battery_monitor() {
+  BatteryMonitor m;
+  EventType e = EventType::kTouched;
+
+  // normal level: nothing
+  for (int i = 0; i < 20; i++) CHECK(!m.update(80, false, e));
+
+  // low level must persist for debounce_samples
+  for (int i = 0; i < m.debounce_samples - 1; i++) CHECK(!m.update(10, false, e));
+  CHECK(m.update(10, false, e));
+  CHECK(e == EventType::kBatteryLow);
+  CHECK(m.isLow());
+
+  // still low: no repeated event
+  for (int i = 0; i < 20; i++) CHECK(!m.update(9, false, e));
+
+  // a level between the thresholds without charging does not recover (hysteresis)
+  for (int i = 0; i < 20; i++) CHECK(!m.update(20, false, e));
+  CHECK(m.isLow());
+
+  // charging recovers after the debounce
+  for (int i = 0; i < m.debounce_samples - 1; i++) CHECK(!m.update(12, true, e));
+  CHECK(m.update(12, true, e));
+  CHECK(e == EventType::kCharging);
+  CHECK(!m.isLow());
+
+  // low level while charging is not "low"
+  for (int i = 0; i < 20; i++) CHECK(!m.update(5, true, e));
+
+  // a noisy single sample does not trigger
+  CHECK(!m.update(5, false, e));
+  CHECK(!m.update(50, false, e));
+  for (int i = 0; i < m.debounce_samples - 1; i++) CHECK(!m.update(5, false, e));
+  CHECK(!m.isLow());
+
+  // invalid level resets the count and is ignored
+  CHECK(!m.update(-2, false, e));
+  CHECK(!m.update(5, false, e));
+  CHECK(!m.isLow());
+}
+
+static void test_battery_events_drive_controller() {
+  HsmBehavior b;
+  BatteryMonitor m;
+  step(b);
+  EventType e;
+  bool low = false;
+  for (int i = 0; i < 10 && !low; i++) {
+    if (m.update(8, false, e)) {
+      b.pushEvent(Event(e));
+      low = true;
+    }
+  }
+  CHECK(low);
+  Action a = step(b);
+  CHECK(b.state() == State::kLowBattery);
+  CHECK(a.set_mood && a.mood == Mood::kSad);
+
+  bool charging = false;
+  for (int i = 0; i < 10 && !charging; i++) {
+    if (m.update(8, true, e)) {
+      b.pushEvent(Event(e));
+      charging = true;
+    }
+  }
+  CHECK(charging);
+  step(b);
+  CHECK(b.state() == State::kIdle);
+}
+
 int main() {
   test_start_idle();
   test_touch_smile_then_neutral();
@@ -146,6 +217,8 @@ int main() {
   test_talking();
   test_low_battery_overrides();
   test_idle_picker();
+  test_battery_monitor();
+  test_battery_events_drive_controller();
   if (failures == 0) printf("all tests passed\n");
   return failures == 0 ? 0 : 1;
 }

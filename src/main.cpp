@@ -18,6 +18,7 @@
 
 #include "Animation.hpp"
 #include "AnimationClipExamples.hpp"
+#include "BatteryMonitor.hpp"
 #include "Behavior.hpp"
 #include "BLEStackchanService.hpp"
 #include "PaletteExamples.hpp"
@@ -68,6 +69,7 @@ unsigned long milli_sec = 0U;
 unsigned long m5_count = 0;
 unsigned long main_count = 0;
 stackchan::behavior::HsmBehavior behavior;
+stackchan::behavior::BatteryMonitor battery_monitor;
 unsigned long last_facial_expression_changed_time = 0;
 
 const Expression expressions[] = {Expression::kNeutral, Expression::kSmile,
@@ -287,6 +289,23 @@ void setup() {
              applyBehaviorAction(behavior.update(obs));
            })
       ->startFps(30);
+
+  // battery level is sampled once per second and turned into BatteryLow / Charging events
+  Tasks
+      .add("Battery_Monitor",
+           [] {
+             int level = M5.Power.getBatteryLevel();
+             bool charging = M5.Power.isCharging() == m5::Power_Class::is_charging;
+             stackchan::behavior::EventType event;
+             if (battery_monitor.update(level, charging, event)) {
+               M5_LOGI("battery: %d%% charging=%d -> %s", level, charging,
+                       event == stackchan::behavior::EventType::kBatteryLow
+                           ? "BatteryLow"
+                           : "Charging");
+               behavior.pushEvent(stackchan::behavior::Event(event));
+             }
+           })
+      ->startFps(1);
 
   Tasks
       .add("Animation_Update",
