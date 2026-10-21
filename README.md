@@ -1,6 +1,6 @@
 # Stackchan Agent
 
-[![PlatformIO Build](https://github.com/botamochi6277/stackchan-agent/actions/workflows/ci-platformio.yml/badge.svg?branch=main)](https://github.com/botamochi6277/stackchan-agent/actions/workflows/ci-platformio.yml)
+[![pioarduino Build](https://github.com/botamochi6277/stackchan-agent/actions/workflows/pioarduino-ci.yml/badge.svg?branch=main)](https://github.com/botamochi6277/stackchan-agent/actions/workflows/pioarduino-ci.yml)
 
 *stackchan-agent* is the root controller of the Super kawaii StackChan.
 It decides how StackChan behaves, like an NPC, and drives the other modules:
@@ -49,7 +49,7 @@ pio device monitor                                    # 115200 baud
 ```
 
 | env | board |
-|---|---|
+| --- | --- |
 | `m5stack-cores3-stackchan-body` | CoreS3 on the StackChan body (default) |
 | `m5stack-cores3` | M5Stack CoreS3 |
 | `m5stack-core2` | M5Stack Core2 |
