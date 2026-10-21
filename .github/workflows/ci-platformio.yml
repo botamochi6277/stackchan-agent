@@ -19,9 +19,13 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.platformio
-          key: ${{ runner.os }}-${{ hashFiles('**/lockfiles') }}
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
       - name: Set up Python
         uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
       - name: Install PlatformIO
         run: |
           python -m pip install --upgrade pip
