@@ -2,29 +2,81 @@
 
 [![pioarduino Build](https://github.com/botamochi6277/stackchan-agent/actions/workflows/pioarduino-ci.yml/badge.svg?branch=main)](https://github.com/botamochi6277/stackchan-agent/actions/workflows/pioarduino-ci.yml)
 
-*stackchan-agent* is the root controller of the Super kawaii StackChan.
+*stackchan-agent* is the central controller for the **next generation** of stackchan.
 It decides how StackChan behaves, like an NPC, and drives the other modules:
 
 - [stackchan-display](https://github.com/botamochi6277/stackchan-display) is a library to control facial expression.
-- *pan tilt servos* (`include/Animation.hpp`) is a sub library of this repository to control servo motions and animations.
+- *motion control* (`include/Animation.hpp`) is a sub library of this repository to control servo motions and animations.
 - [StackChan-BSP](https://github.com/botamochi6277/StackChan-BSP) is the board support package of the StackChan body (servos, head touch sensor, LEDs).
+- {TODO: add description about M5Unified}
 
 ```mermaid
+---
+config:
+  theme: 'redux-dark'
+title: 'StackChan Firmware Architecture'
+---
 graph LR
 
-subgraph m5stack
-
-  stackchan_agent[stackchan-agent]
-  behavior[behavior controller]
-  stackchan-display
-  pan_tilt_servos
-
-  stackchan_agent---behavior
-  behavior-->stackchan-display
-  behavior-->pan_tilt_servos
+subgraph agent[stackchan-agent]
+    policy(("policy/\nbehavior controller"))
 end
 
-Central---|BLE|stackchan_agent
+style agent stroke:#2CFF05,stroke-width:4px
+
+%% sensor inputs
+
+subgraph sensor
+    camera
+    touch
+    mic
+end
+
+camera[fas:fa-camera camera]-->|cam image|agent
+touch[head touch sensor]-->agent
+mic[microphone]-->agent
+
+subgraph state
+    head_rot
+    bat
+end
+
+head_rot[head rotation sensor]-->|pan tilt angles|agent
+bat[battery sensor]-->agent
+
+%% comm inputs
+comm_proxy[com. proxy]
+esp_now[esp now]-.->comm_proxy
+ble[bluetooth]-.->comm_proxy
+usb[usb]-.->comm_proxy
+wifi[WiFi]-.->comm_proxy
+comm_proxy-->agent
+
+%% extra
+
+%% llm[large language model]-.->wifi
+
+%% outputs
+
+agent-->display
+
+subgraph display[display control]
+    face([face])
+    speech([speech bubble])
+    decorators([decorators])
+end
+
+display-->display_lib["display"]
+
+agent-->mot[motion control]
+mot-->servo_lib[servo]
+
+%% head neopixels on M5StackChan Head
+head_led[head LED control]
+agent-->head_led[head LED control]
+head_led-->led_lib[LED]
+
+agent-->speaker
 ```
 
 ## Features
