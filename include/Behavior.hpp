@@ -17,6 +17,7 @@ enum class Mood : uint8_t {
   kSad,
   kSleepy,
   kDoubt,
+  kSurprised,
 };
 
 /// Head motion requested by the controller.
@@ -118,6 +119,7 @@ class HsmBehavior {
   uint32_t pick_min_ms = 3000;
   uint32_t pick_max_ms = 10000;
   uint32_t transient_ms = 2000;  // duration of an idle smile
+  uint32_t surprised_ms = 1500;  // duration of the surprised face after a loud sound
 
   TransitionCallback on_transition = nullptr;
 
@@ -199,6 +201,11 @@ class HsmBehavior {
   void setSpeech(const char* s) {
     action_.set_speech = true;
     action_.speech = s;
+  }
+
+  void startle() {
+    setMood(Mood::kSurprised);
+    transient_until_ms_ = now_ + surprised_ms;  // back to neutral by updateTransientMood()
   }
 
   void scheduleNextPick() {
@@ -297,8 +304,13 @@ class HsmBehavior {
         break;
 
       case EventType::kLoudSound:
+        // startled: wake up if sleeping, and show a surprised face for a moment.
+        // Other states (touched, talking) keep their own face.
         if (state_ == State::kSleeping) {
           transition(State::kIdle, "loud sound");
+          startle();
+        } else if (state_ == State::kIdle || state_ == State::kAttentive) {
+          startle();
         }
         break;
 

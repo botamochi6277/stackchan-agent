@@ -20,6 +20,7 @@
 #include "AnimationClipExamples.hpp"
 #include "BatteryMonitor.hpp"
 #include "Behavior.hpp"
+#include "SoundMonitor.hpp"
 #include "BLEStackchanService.hpp"
 #include "PaletteExamples.hpp"
 
@@ -70,6 +71,13 @@ unsigned long m5_count = 0;
 unsigned long main_count = 0;
 stackchan::behavior::HsmBehavior behavior;
 stackchan::behavior::BatteryMonitor battery_monitor;
+
+// microphone: loud sounds are detected on chunks of 512 samples (32 ms at 16 kHz)
+stackchan::behavior::SoundMonitor sound_monitor;
+constexpr size_t MIC_CHUNK_LENGTH = 512;
+constexpr uint32_t MIC_SAMPLE_RATE = 16000;
+int16_t mic_buffer[MIC_CHUNK_LENGTH];
+bool mic_has_chunk = false;
 unsigned long last_facial_expression_changed_time = 0;
 
 const Expression expressions[] = {Expression::kNeutral, Expression::kSmile,
@@ -290,6 +298,33 @@ void setup() {
            })
       ->startFps(30);
 
+  // the speaker and the microphone share the I2S port of the CoreS3, and the speaker is not used here
+  M5.Speaker.end();
+  if (M5.Mic.begin()) {
+    Tasks
+        .add("Sound_Monitor",
+             [] {
+               // record() fills the buffer asynchronously, so read it when the recording is done
+               if (M5.Mic.isRecording() != 0) {
+                 return;
+               }
+               if (mic_has_chunk) {
+                 stackchan::behavior::EventType event;
+                 if (sound_monitor.update(mic_buffer, MIC_CHUNK_LENGTH, millis(),
+                                          event)) {
+                   M5_LOGI("microphone: loud sound (noise floor %.0f)",
+                           sound_monitor.noiseFloor());
+                   behavior.pushEvent(stackchan::behavior::Event(event));
+                 }
+               }
+               mic_has_chunk = M5.Mic.record(mic_buffer, MIC_CHUNK_LENGTH,
+                                             MIC_SAMPLE_RATE);
+             })
+        ->startFps(20);
+  } else {
+    M5_LOGW("Microphone is not available");
+  }
+
   // battery level is sampled once per second and turned into BatteryLow / Charging events
   Tasks
       .add("Battery_Monitor",
@@ -352,6 +387,9 @@ void applyBehaviorAction(const stackchan::behavior::Action& action) {
         break;
       case Mood::kDoubt:
         e = Expression::kDoubt;
+        break;
+      case Mood::kSurprised:
+        e = Expression::kSurprised;
         break;
     }
     display.getExpressionWeight().setEmotionalExpression(e, 255);

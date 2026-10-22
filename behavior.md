@@ -2,7 +2,7 @@
 
 Status: the controller core is implemented in [include/Behavior.hpp](include/Behavior.hpp) and wired into [src/main.cpp](src/main.cpp).
 Host tests: [test/test_behavior.cpp](test/test_behavior.cpp).
-Touch and battery events work today. Camera, microphone and BLE/LLM events are defined and tested, but nothing produces them yet.
+Touch, battery and loud-sound events work today. Camera and BLE/LLM events are defined and tested, but nothing produces them yet.
 
 ## Purpose
 
@@ -119,7 +119,7 @@ Events are produced from sensors and communication. States never read sensors di
 | `Flicked(dir)` | screen flick | changes face / expression (manual debug control) |
 | `ButtonPressed(id)` | buttons A/B/C | manual debug control |
 | `PersonDetected` / `PersonLost` | camera | not available |
-| `LoudSound` | microphone | not available |
+| `LoudSound` | microphone, through `SoundMonitor` (see below) | implemented |
 | `BatteryLow` / `Charging` | battery sensor, through `BatteryMonitor` (see below) | implemented |
 | `SpeakRequest(text)` | BLE / WiFi / LLM | not available |
 | `SpeechFinished` | speaker | not available |
@@ -169,6 +169,29 @@ Behavior notes:
 - Events are ignored while in `LowBattery`, except `Charging`.
 - Buttons and flicks in `main.cpp` stay outside the controller as manual debug control. The manually set expression stays until the controller next sets a mood.
 
+## Loud sound events
+
+[include/SoundMonitor.hpp](include/SoundMonitor.hpp) detects loud sounds such as claps, knocks and shouts. It has no Arduino / M5Unified dependency and is tested on the PC.
+`main.cpp` records the microphone in chunks of 512 samples (32 ms at 16 kHz) in the `Sound_Monitor` task (20 fps) and feeds them to the monitor.
+
+A chunk is loud when its RMS (after removing the DC offset of the microphone) is above both:
+
+- `min_rms` (3000 on the int16 scale), and
+- `ratio` (6) times the noise floor, which follows quiet sounds quickly and loud sounds very slowly.
+
+So a steady loud environment (TV, fan) stops triggering once the noise floor has adapted, instead of firing all the time.
+After an event, the next one is ignored for `cooldown_ms` (3 s). All three are public fields.
+
+What the controller does with `LoudSound`:
+
+- `Sleeping`: wakes up into `Idle` with a surprised face.
+- `Idle` / `Attentive`: surprised face for `surprised_ms` (1.5 s), then back to neutral.
+- `Interacting` / `Talking` / `LowBattery`: ignored, they keep their own face.
+
+It also counts as activity, so loud sounds keep StackChan from falling asleep.
+
+The speaker and the microphone share the I2S port of the CoreS3, so `main.cpp` stops the speaker (`M5.Speaker.end()`) before starting the microphone. This has to change when voice output is added.
+
 ## Battery events
 
 [include/BatteryMonitor.hpp](include/BatteryMonitor.hpp) turns battery samples into events. It is also free of Arduino / M5Unified dependencies and tested on the PC.
@@ -216,7 +239,8 @@ The next pick happens after `random(3 s, 10 s)`. Weights and cooldowns are data,
 3. [x] Idle picker, replacing the random motion every minute.
 4. [x] Host tests for the state sequences and the picker.
 5. [ ] Tune weights, cooldowns and timings on a real device.
-6. [ ] Produce `PersonDetected` / `PersonLost` (camera) and `LoudSound` (microphone).
+6. [x] Produce `LoudSound` from the microphone (`include/SoundMonitor.hpp`).
+6. [ ] Produce `PersonDetected` / `PersonLost` from the camera.
 7. [x] Produce `BatteryLow` / `Charging` from the battery sensor (`include/BatteryMonitor.hpp`).
 8. [ ] Produce `SpeakRequest` from BLE / WiFi / LLM.
 9. [ ] Cheek blush with a smile (needs a newer `stackchan-display` than 0.4.0, which has no `kBlush`).

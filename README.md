@@ -35,7 +35,7 @@ Central---|BLE|stackchan_agent
 - **Head motion** with animation clips (look front / up / down / left / right, nod, shake). Button C plays the clips in order. See [animation.md](animation.md).
 - **BLE service** to control the face and servos from a central device. The BLE code is currently commented out in `src/main.cpp`.
 
-The head touch sensor and the battery level (low battery -> sad face until charging) are connected to the behavior controller. Camera, microphone and BLE / LLM inputs are not connected yet.
+The head touch sensor, the battery level (low battery -> sad face until charging) and the microphone (a loud sound makes StackChan look surprised, and wakes it up) are connected to the behavior controller. Camera and BLE / LLM inputs are not connected yet.
 See the plan in [behavior.md](behavior.md) and the overall design in [policy.md](policy.md).
 
 ## Build

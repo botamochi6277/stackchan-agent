@@ -2,10 +2,12 @@
 // Build and run (from stackchan-agent/):
 //   g++ -std=c++17 -Wall -Iinclude test/test_behavior.cpp -o test_behavior && ./test_behavior
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 
 #include "BatteryMonitor.hpp"
 #include "Behavior.hpp"
+#include "SoundMonitor.hpp"
 
 using namespace stackchan::behavior;
 
@@ -209,6 +211,134 @@ static void test_battery_events_drive_controller() {
   CHECK(b.state() == State::kIdle);
 }
 
+// make a chunk of a sine wave with the given amplitude and DC offset
+static void makeChunk(int16_t* buf, size_t n, float amplitude, float dc = 0.0f) {
+  for (size_t i = 0; i < n; i++) {
+    buf[i] = static_cast<int16_t>(dc + amplitude * sinf(0.3f * i));
+  }
+}
+
+static void test_sound_monitor() {
+  SoundMonitor m;
+  const size_t N = 512;
+  int16_t quiet[N], loud[N];
+  makeChunk(quiet, N, 300.0f, 1500.0f);  // room noise with a DC offset
+  makeChunk(loud, N, 12000.0f, 1500.0f);
+  EventType e = EventType::kTouched;
+  uint32_t now = 0;
+
+  // silence: no event, and the first chunk only sets the noise floor
+  for (int i = 0; i < 50; i++) {
+    CHECK(!m.update(quiet, N, now, e));
+    now += 32;
+  }
+
+  // a clap
+  CHECK(m.update(loud, N, now, e));
+  CHECK(e == EventType::kLoudSound);
+  now += 32;
+
+  // cooldown: no second event right away, even if it is still loud
+  CHECK(!m.update(loud, N, now, e));
+  now += 1000;
+  CHECK(!m.update(loud, N, now, e));
+
+  // after the cooldown a new clap is detected
+  for (int i = 0; i < 10; i++) {
+    m.update(quiet, N, now, e);
+    now += 32;
+  }
+  now += 3000;
+  CHECK(m.update(loud, N, now, e));
+
+  // a quiet chunk with a large DC offset only is not loud
+  SoundMonitor m2;
+  int16_t dc_only[N];
+  for (size_t i = 0; i < N; i++) dc_only[i] = 20000;
+  now = 0;
+  for (int i = 0; i < 20; i++) {
+    CHECK(!m2.update(dc_only, N, now, e));
+    now += 32;
+  }
+
+  // a steady loud environment stops triggering once the noise floor has adapted
+  SoundMonitor m3;
+  m3.cooldown_ms = 0;
+  int events = 0;
+  now = 0;
+  m3.update(quiet, N, now, e);
+  for (int i = 0; i < 20000; i++) {
+    if (m3.update(loud, N, now, e)) events++;
+    now += 32;
+  }
+  printf("steady loud sound: %d events in 10 min\n", events);
+  CHECK(events > 0);
+  CHECK(events < 3000);
+
+  // invalid input
+  CHECK(!m.update(nullptr, 10, now, e));
+  CHECK(!m.update(quiet, 0, now, e));
+}
+
+static void test_sound_wakes_controller() {
+  HsmBehavior b;
+  b.sleep_after_ms = 1000;
+  step(b);
+  run(b, 1500);
+  CHECK(b.state() == State::kSleeping);
+
+  SoundMonitor m;
+  const size_t N = 512;
+  int16_t quiet[N], loud[N];
+  makeChunk(quiet, N, 200.0f);
+  makeChunk(loud, N, 15000.0f);
+  EventType e;
+  m.update(quiet, N, t, e);
+  CHECK(m.update(loud, N, t + 33, e));
+  b.pushEvent(Event(e));
+  Action a = step(b);
+  CHECK(b.state() == State::kIdle);
+  CHECK(a.set_mood && a.mood == Mood::kSurprised);  // woken up and startled
+}
+
+static void test_loud_sound_surprised() {
+  HsmBehavior b;
+  b.surprised_ms = 1000;
+  step(b);
+
+  // awake and idle: surprised, then back to neutral
+  b.pushEvent(Event(EventType::kLoudSound));
+  Action a = step(b);
+  CHECK(b.state() == State::kIdle);
+  CHECK(a.set_mood && a.mood == Mood::kSurprised);
+
+  bool neutral = false;
+  for (uint32_t i = 0; i < 1500; i += 33) {
+    Action x = step(b);
+    CHECK(!(x.set_mood && x.mood == Mood::kSurprised));
+    if (x.set_mood && x.mood == Mood::kNeutral) neutral = true;
+  }
+  CHECK(neutral);
+
+  // attentive: surprised, and still attentive
+  b.pushEvent(Event(EventType::kPersonDetected));
+  step(b);
+  CHECK(b.state() == State::kAttentive);
+  b.pushEvent(Event(EventType::kLoudSound));
+  a = step(b);
+  CHECK(b.state() == State::kAttentive);
+  CHECK(a.set_mood && a.mood == Mood::kSurprised);
+
+  // interacting keeps its smile
+  b.pushEvent(Event(EventType::kTouched));
+  step(b);
+  CHECK(b.state() == State::kInteracting);
+  b.pushEvent(Event(EventType::kLoudSound));
+  a = step(b);
+  CHECK(b.state() == State::kInteracting);
+  CHECK(!(a.set_mood && a.mood == Mood::kSurprised));
+}
+
 int main() {
   test_start_idle();
   test_touch_smile_then_neutral();
@@ -219,6 +349,9 @@ int main() {
   test_idle_picker();
   test_battery_monitor();
   test_battery_events_drive_controller();
+  test_sound_monitor();
+  test_sound_wakes_controller();
+  test_loud_sound_surprised();
   if (failures == 0) printf("all tests passed\n");
   return failures == 0 ? 0 : 1;
 }
