@@ -6,9 +6,14 @@
 It decides how StackChan behaves, like an NPC, and drives the other modules:
 
 - [stackchan-display](https://github.com/botamochi6277/stackchan-display) is a library to control facial expression.
+- [stackchan-voice](https://github.com/botamochi6277/stackchan-voice) is a library to play sounds. StackChan makes the voice of a character when the facial expression changes (see [Voice](#voice)).
 - *motion control* (`include/Animation.hpp`) is a sub library of this repository to control servo motions and animations.
 - [StackChan-BSP](https://github.com/botamochi6277/StackChan-BSP) is the board support package of the StackChan body (servos, head touch sensor, LEDs).
-- {TODO: add description about M5Unified}
+- [M5Unified](https://github.com/m5stack/M5Unified) is the hardware abstraction layer of M5Stack devices. It is a relatively low-level API that gives the same way to use the devices of different boards (CoreS3, Core2, Core, ...), and the other libraries (stackchan-display, stackchan-voice, StackChan-BSP) are built on it. This repository uses it to operate:
+  - the LCD (`M5.Display` / `M5.Lcd`, drawing is done by M5GFX) and the touch screen (`M5.Touch`)
+  - the buttons (`M5.BtnA/B/C`) of the boards that have them
+  - the microphone (`M5.Mic`, for the loud sound detection) and the speaker (`M5.Speaker`, played by stackchan-voice)
+  - the power management (`M5.Power`, for the battery level and the charging state)
 
 ```mermaid
 ---
@@ -60,7 +65,7 @@ comm_proxy-->agent
 
 agent-->display
 
-subgraph display[display control]
+subgraph display[stackchan-display]
     face([face])
     speech([speech bubble])
     decorators([decorators])
@@ -76,7 +81,15 @@ head_led[head LED control]
 agent-->head_led[head LED control]
 head_led-->led_lib[LED]
 
-agent-->speaker
+subgraph stackchan-voice
+  voice[voice control]
+end
+agent-->voice-->speaker
+
+%% custom dependencies developed by botamochi
+classDef  custom_lib stroke:#59ffff,stroke-width:4px
+class display,stackchan-voice custom_lib
+
 ```
 
 ## Features
@@ -84,11 +97,16 @@ agent-->speaker
 - **Behavior controller**: a hierarchical state machine (`Idle`, `Attentive`, `Interacting`, `Talking`, `Sleeping`, `LowBattery`) with an idle picker that makes StackChan look around, nod and smile on its own.
   Touching the head makes it smile and nod, and it falls asleep after 5 minutes without events. See [behavior.md](behavior.md).
 - **Face and expression** with [stackchan-display](https://github.com/botamochi6277/stackchan-display). Buttons A/B change the face and the expression, and flicking the screen changes them too (manual debug control).
+- **Voice** with [stackchan-voice](https://github.com/botamochi6277/stackchan-voice). A change of the expression plays a voice of the character (robot, cat, dog, bird, owl or friendly robot) that suits the emotion. The speaker and the microphone share the I2S port, so the microphone is stopped while the voice is played. See [Voice](#voice).
 - **Head motion** with animation clips (look front / up / down / left / right, nod, shake). Button C plays the clips in order. See [animation.md](animation.md).
 - **BLE service** to control the face and servos from a central device. The BLE code is currently commented out in `src/main.cpp`.
 
 The head touch sensor, the battery level (low battery -> sad face until charging) and the microphone (a loud sound makes StackChan look surprised, and wakes it up) are connected to the behavior controller. Camera and BLE / LLM inputs are not connected yet.
 See the plan in [behavior.md](behavior.md) and the overall design in [policy.md](policy.md).
+
+## Hardware
+
+Which device the ESP32-S3 talks to by SPI / I2C / I2S / UART, with the pins and the I2C addresses, is in [hardware.md](hardware.md). Check it before adding a peripheral.
 
 ## Build
 
@@ -103,6 +121,7 @@ pio device monitor                                    # 115200 baud
 | env | board |
 | --- | --- |
 | `m5stack-cores3-stackchan-body` | CoreS3 on the StackChan body (default) |
+| `m5stack-cores3-stackchan-body-pioarduino` | the same as above, built with [pioarduino](https://github.com/pioarduino/platform-espressif32) (Arduino-ESP32 3.x / ESP-IDF 5.x). This is what the CI builds. |
 | `m5stack-cores3` | M5Stack CoreS3 |
 | `m5stack-core2` | M5Stack Core2 |
 | `m5stack-core1` | M5Stack Core (Basic / Gray) |
@@ -132,37 +151,11 @@ g++ -std=c++17 -Wall -Iinclude test/test_behavior.cpp -o test_behavior
 
 ## Troubleshooting
 
-### The touch screen does not respond (flick, tap)
+Known problems and their solutions are in [troubleshooting.md](troubleshooting.md):
 
-Symptom: the head touch sensor and the microphone work, but the touch screen does not react at all. Flicking the screen does not change the expression.
-
-What was checked:
-
-- The touch screen (FT6336U, I2C `0x38`) and the other devices do not share a bus line. The LCD uses SPI (MOSI 37, SCLK 36, DC 35, CS 3), the touch screen uses the I2C bus (SDA 11, SCL 12) with its interrupt on GPIO21, and the servos use UART1 (GPIO 6 / 7). No I2C address is used twice.
-- Reading the touch controller directly returned "no touch point" even when the interrupt (GPIO21) went low, and `M5.Touch.getCount()` stayed 0. `M5.Touch.isEnabled()` was true.
-- The state did not change by flashing another firmware, and the same symptom appeared with the plain demo of stackchan-voice.
-
-Solution: **restart the StackChan itself** (unplug the USB cable and plug it again, or turn the power off and on). The touch screen worked again after the restart, and no code was changed for it. Flashing a firmware does not reset the touch controller, so it may stay in the abnormal state across flashing.
-
-If it happens again, check the touch screen with the demo of stackchan-display or stackchan-voice first. If the demo does not respond either, the cause is not this firmware.
-
-### The firmware crashes right after the splash screen
-
-Symptom: after the "CHANt" splash, the firmware stops with `Guru Meditation Error: Core 1 panic'ed (LoadProhibited)`. `EXCVADDR` is a small address such as `0x50`, and the backtrace goes through `Display::update()` -> `pushSprite`.
-
-Cause: `Display` keeps the address of `M5.Lcd` when it is constructed. A global `Display` may be constructed before `M5` is, depending on the order of the static initialization, and then the canvas has no valid destination.
-
-Solution: `Display` is constructed in `setup()` after `M5StackChan.begin()` (see `display_storage` in `src/main.cpp`). Do not make it a global object again.
-
-To read a backtrace, use the `addr2line` of the toolchain:
-
-```bash
-xtensa-esp32s3-elf-addr2line -pfiaC -e .pio/build/<env>/firmware.elf <addresses>
-```
-
-### The upload fails with "Could not open COM3, the port is busy"
-
-Another program is holding the serial port, such as a running `pio device monitor` or a serial monitor of an IDE. Close it and upload again.
+- The touch screen does not respond (restart the StackChan itself)
+- The firmware crashes right after the splash screen
+- The upload fails because the serial port is busy
 
 <!-- ## Service Detail
 TODO: Update move bluetooth description to bluetooth.md
