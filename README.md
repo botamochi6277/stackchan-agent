@@ -110,7 +110,16 @@ pio device monitor                                    # 115200 baud
 Notes on dependencies:
 
 - `M5Unified` is pinned to `0.2.26`, and `StackChan-BSP` is taken from the fork `botamochi6277/StackChan-BSP`, because `StackChan-BSP` 1.1.0 from the registry does not compile with recent `M5Unified`.
-- `stackchan-display` is pinned to the tag `0.4.0`.
+- `stackchan-display` is pinned to the tag `0.5.0`, and `stackchan-voice` to the tag `0.1.0`.
+
+## Voice
+
+When the facial expression changes, StackChan plays the voice of a character with [stackchan-voice](https://github.com/botamochi6277/stackchan-voice) (`include/ExpressionVoice.hpp`).
+
+- The expression is set through `setExpression()` in `src/main.cpp`, so a change by the behavior controller, a button or a flick makes a sound.
+- The character (`kRobot` by default), the volume and whether returning to the neutral face makes a sound (off by default) are the members of `ExpressionVoice`.
+- The speaker and the microphone share the I2S port of the CoreS3. The microphone is stopped while a voice is played and started again after it, so the loud sound detection does not hear StackChan's own voice.
+- The voice is generated just before it is played, so other tasks wait for it for a moment.
 
 ## Test
 
@@ -120,6 +129,40 @@ The behavior controller (`include/Behavior.hpp`) does not depend on Arduino or M
 g++ -std=c++17 -Wall -Iinclude test/test_behavior.cpp -o test_behavior
 ./test_behavior
 ```
+
+## Troubleshooting
+
+### The touch screen does not respond (flick, tap)
+
+Symptom: the head touch sensor and the microphone work, but the touch screen does not react at all. Flicking the screen does not change the expression.
+
+What was checked:
+
+- The touch screen (FT6336U, I2C `0x38`) and the other devices do not share a bus line. The LCD uses SPI (MOSI 37, SCLK 36, DC 35, CS 3), the touch screen uses the I2C bus (SDA 11, SCL 12) with its interrupt on GPIO21, and the servos use UART1 (GPIO 6 / 7). No I2C address is used twice.
+- Reading the touch controller directly returned "no touch point" even when the interrupt (GPIO21) went low, and `M5.Touch.getCount()` stayed 0. `M5.Touch.isEnabled()` was true.
+- The state did not change by flashing another firmware, and the same symptom appeared with the plain demo of stackchan-voice.
+
+Solution: **restart the StackChan itself** (unplug the USB cable and plug it again, or turn the power off and on). The touch screen worked again after the restart, and no code was changed for it. Flashing a firmware does not reset the touch controller, so it may stay in the abnormal state across flashing.
+
+If it happens again, check the touch screen with the demo of stackchan-display or stackchan-voice first. If the demo does not respond either, the cause is not this firmware.
+
+### The firmware crashes right after the splash screen
+
+Symptom: after the "CHANt" splash, the firmware stops with `Guru Meditation Error: Core 1 panic'ed (LoadProhibited)`. `EXCVADDR` is a small address such as `0x50`, and the backtrace goes through `Display::update()` -> `pushSprite`.
+
+Cause: `Display` keeps the address of `M5.Lcd` when it is constructed. A global `Display` may be constructed before `M5` is, depending on the order of the static initialization, and then the canvas has no valid destination.
+
+Solution: `Display` is constructed in `setup()` after `M5StackChan.begin()` (see `display_storage` in `src/main.cpp`). Do not make it a global object again.
+
+To read a backtrace, use the `addr2line` of the toolchain:
+
+```bash
+xtensa-esp32s3-elf-addr2line -pfiaC -e .pio/build/<env>/firmware.elf <addresses>
+```
+
+### The upload fails with "Could not open COM3, the port is busy"
+
+Another program is holding the serial port, such as a running `pio device monitor` or a serial monitor of an IDE. Close it and upload again.
 
 <!-- ## Service Detail
 TODO: Update move bluetooth description to bluetooth.md
