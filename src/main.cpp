@@ -5,6 +5,7 @@
 // #endif
 
 #include <ArduinoBLE.h>
+#include <new>
 #include <M5Unified.h>
 #include <TaskManager.h>
 
@@ -20,6 +21,7 @@
 #include "AnimationClipExamples.hpp"
 #include "BatteryMonitor.hpp"
 #include "Behavior.hpp"
+#include "ExpressionVoice.hpp"
 #include "SoundMonitor.hpp"
 #include "BLEStackchanService.hpp"
 #include "PaletteExamples.hpp"
@@ -55,7 +57,10 @@ static_assert(static_cast<int>(stackchan::behavior::Motion::kShake) ==
                   static_cast<int>(AnimationName::kShake),
               "Motion and AnimationName must have the same values");
 
-Display display;
+// The canvas of Display keeps the address of M5.Lcd, which is not valid until M5 is constructed.
+// A global Display may be constructed before M5, so it is constructed in setup() after M5StackChan.begin().
+alignas(Display) static unsigned char display_storage[sizeof(Display)];
+Display& display = *reinterpret_cast<Display*>(display_storage);
 char balloon_text[20];
 // ble::StackchanService stackchan_srv;
 
@@ -80,6 +85,9 @@ int16_t mic_buffer[MIC_CHUNK_LENGTH];
 bool mic_has_chunk = false;
 unsigned long last_facial_expression_changed_time = 0;
 
+// plays a voice when the facial expression changes
+stackchan::behavior::ExpressionVoice expression_voice;
+
 const Expression expressions[] = {Expression::kNeutral, Expression::kSmile,
                                   Expression::kAngry,   Expression::kSad,
                                   Expression::kSleepy,  Expression::kDoubt};
@@ -97,6 +105,7 @@ void changeFace(int8_t delta);
 void changeExpression(int8_t delta);
 void assignMiaPalette(ColorPalette* palette);
 void applyBehaviorAction(const stackchan::behavior::Action& action);
+void setExpression(stackchan::display::Expression expression);
 void logTransition(stackchan::behavior::State from,
                    stackchan::behavior::State to, const char* cause);
 
@@ -107,6 +116,7 @@ void setup() {
   // #endif
 
   M5StackChan.begin();
+  new (display_storage) Display();
 
   // M5.Log.setLogLevel(m5::log_target_serial, ESP_LOG_VERBOSE);
 
@@ -299,11 +309,19 @@ void setup() {
       ->startFps(30);
 
   // the speaker and the microphone share the I2S port of the CoreS3, and the speaker is not used here
+  // (the speaker is started by expression_voice only while a voice is played)
   M5.Speaker.end();
-  if (M5.Mic.begin()) {
+  const bool mic_ok = M5.Mic.begin();
+  expression_voice.begin(mic_ok);
+  if (mic_ok) {
     Tasks
         .add("Sound_Monitor",
              [] {
+               // the microphone is stopped while a voice is played
+               if (expression_voice.busy()) {
+                 mic_has_chunk = false;
+                 return;
+               }
                // record() fills the buffer asynchronously, so read it when the recording is done
                if (M5.Mic.isRecording() != 0) {
                  return;
@@ -324,6 +342,9 @@ void setup() {
   } else {
     M5_LOGW("Microphone is not available");
   }
+
+  // gives the I2S port back to the microphone when the voice has finished
+  Tasks.add("Voice_Update", [] { expression_voice.update(); })->startFps(20);
 
   // battery level is sampled once per second and turned into BatteryLow / Charging events
   Tasks
@@ -392,7 +413,7 @@ void applyBehaviorAction(const stackchan::behavior::Action& action) {
         e = Expression::kSurprised;
         break;
     }
-    display.getExpressionWeight().setEmotionalExpression(e, 255);
+    setExpression(e);
   }
 
   if (action.set_speech) {
@@ -439,11 +460,15 @@ void changeExpression(int8_t delta) {
   } else {
     expression_idx += delta;
   }
-  display.getExpressionWeight().setEmotionalExpression(
-      static_cast<stackchan::display::Expression>(
-          expression_idx %
-          (static_cast<int>(stackchan::display::Expression::kRelax) + 1)),
-      255);
+  setExpression(static_cast<stackchan::display::Expression>(
+      expression_idx %
+      (static_cast<int>(stackchan::display::Expression::kRelax) + 1)));
+}
+
+// show the expression and play the voice for it
+void setExpression(stackchan::display::Expression expression) {
+  display.getExpressionWeight().setEmotionalExpression(expression, 255);
+  expression_voice.onExpression(expression);
 }
 
 void assignMiaPalette(ColorPalette* palette) {
