@@ -110,12 +110,35 @@ void logTransition(stackchan::behavior::State from,
                    stackchan::behavior::State to, const char* cause);
 
 void setup() {
+  // Arduino-ESP32 3.x: with the USB-Serial/JTAG (ARDUINO_USB_MODE=1) Serial is not
+  // started automatically, and the ESP-IDF log goes to UART0, which is not
+  // connected to the USB port. Start Serial and send the log to it.
+  Serial.begin(115200);
+  Serial.setDebugOutput(true);
+  esp_log_level_set("*", ESP_LOG_INFO);  // the default level of the prebuilt libraries is ERROR
+  esp_log_set_vprintf([](const char* format, va_list args) -> int {
+    char buf[256];
+    int n = vsnprintf(buf, sizeof(buf), format, args);
+    if (n > 0) {
+      Serial.write(reinterpret_cast<const uint8_t*>(buf),
+                   n < static_cast<int>(sizeof(buf)) ? n : sizeof(buf) - 1);
+    }
+    return n;
+  });
+
   // please uncomment if you supply power from GROVE connector to the CORES3
   // #ifdef ARDUINO_M5STACK_CORES3
   //   cfg.output_power = false;
   // #endif
 
   M5StackChan.begin();
+
+  // M5_LOGx() writes with printf() (stdout = UART0), which is not the USB port.
+  // Send it to Serial through the callback instead.
+  M5.Log.setLogLevel(m5::log_target_serial, ESP_LOG_NONE);
+  M5.Log.setLogLevel(m5::log_target_callback, ESP_LOG_INFO);
+  M5.Log.setCallback([](esp_log_level_t, bool, const char* text) { Serial.print(text); });
+
   new (display_storage) Display();
 
   // M5.Log.setLogLevel(m5::log_target_serial, ESP_LOG_VERBOSE);
