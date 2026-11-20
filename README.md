@@ -1,5 +1,6 @@
 # Stackchan Agent
 
+[![PlatformIO Build](https://github.com/botamochi6277/stackchan-agent/actions/workflows/platformio-ci.yml/badge.svg?branch=main)](https://github.com/botamochi6277/stackchan-agent/actions/workflows/platformio-ci.yml)
 [![pioarduino Build](https://github.com/botamochi6277/stackchan-agent/actions/workflows/pioarduino-ci.yml/badge.svg?branch=main)](https://github.com/botamochi6277/stackchan-agent/actions/workflows/pioarduino-ci.yml)
 
 *stackchan-agent* is the central controller for the **next generation** of stackchan.
@@ -120,8 +121,8 @@ pio device monitor                                    # 115200 baud
 
 | env | board |
 | --- | --- |
-| `m5stack-cores3-stackchan-body` | CoreS3 on the StackChan body (default) |
-| `m5stack-cores3-stackchan-body-pioarduino` | the same as above, built with [pioarduino](https://github.com/pioarduino/platform-espressif32) (Arduino-ESP32 3.x / ESP-IDF 5.x). This is what the CI builds. |
+| `m5stack-cores3-stackchan-body` | CoreS3 on the StackChan body (default), built with the stock `espressif32` platform. Built by `platformio-ci.yml`. |
+| `m5stack-cores3-stackchan-body-pioarduino` | the same as above, built with [pioarduino](https://github.com/pioarduino/platform-espressif32) (Arduino-ESP32 3.x / ESP-IDF 5.x). Built by `pioarduino-ci.yml`. |
 | `m5stack-cores3` | M5Stack CoreS3 |
 | `m5stack-core2` | M5Stack Core2 |
 | `m5stack-core1` | M5Stack Core (Basic / Gray) |
