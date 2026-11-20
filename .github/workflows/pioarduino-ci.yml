@@ -1,6 +1,6 @@
 # Build the firmware with pioarduino (Arduino-ESP32 3.x / ESP-IDF 5.x) instead of the stock espressif32 platform.
 # pioarduino: https://github.com/pioarduino/platform-espressif32
-# The environment is defined in platformio.ini.
+# The environment is defined in platformio.ini. The stock platform build is in platformio-ci.yml.
 name: pioarduino CI
 
 on: [push, pull_request]
